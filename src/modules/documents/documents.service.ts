@@ -1,167 +1,174 @@
-import { prisma } from '../../config/prisma';
-import { userNameSelect } from '../../utils/name.utils';
-import { s3Client } from '../../config/s3';
-import { env } from '../../config/env';
-import { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { NotFoundError, ForbiddenError } from '../../utils/errors';
-import { sendEmail } from '../../config/email';
-import { UserRole } from '@prisma/client';
-import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
+import { prisma } from "../../config/prisma";
+import { userNameSelect } from "../../utils/name.utils";
+import { s3Client } from "../../config/s3";
+import { env } from "../../config/env";
+import {
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+import { NotFoundError, ForbiddenError } from "../../utils/errors";
+import { sendEmail } from "../../config/email";
+import { UserRole } from "@prisma/client";
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
-function classifyDocumentType(fileName: string, currentType: string = 'other'): string {
+function classifyDocumentType(
+  fileName: string,
+  currentType: string = "other",
+): string {
   const lowerName = fileName.toLowerCase();
-  
+
   if (
-    lowerName.includes('license') || 
-    lowerName.includes('licence') || 
-    lowerName.includes('passport') || 
-    lowerName.includes('govt') || 
-    lowerName.includes('government') ||
+    lowerName.includes("license") ||
+    lowerName.includes("licence") ||
+    lowerName.includes("passport") ||
+    lowerName.includes("govt") ||
+    lowerName.includes("government") ||
     /\bid\b/.test(lowerName) ||
     /\bdl\b/.test(lowerName) ||
-    lowerName.includes('driver') ||
-    lowerName.includes('state_id') ||
-    lowerName.includes('state-id')
+    lowerName.includes("driver") ||
+    lowerName.includes("state_id") ||
+    lowerName.includes("state-id")
   ) {
-    return 'government_id';
-  }
-  
-  if (
-    lowerName.includes('income') || 
-    lowerName.includes('paystub') || 
-    lowerName.includes('pay_stub') || 
-    lowerName.includes('pay-stub') || 
-    lowerName.includes('stub') || 
-    lowerName.includes('w2') || 
-    lowerName.includes('w-2') || 
-    lowerName.includes('salary') || 
-    lowerName.includes('earning') ||
-    lowerName.includes('payslip')
-  ) {
-    return 'proof_of_income';
+    return "government_id";
   }
 
   if (
-    lowerName.includes('birth') || 
-    lowerName.includes('certificate') || 
-    lowerName.includes('baby') || 
-    lowerName.includes('child_cert')
+    lowerName.includes("income") ||
+    lowerName.includes("paystub") ||
+    lowerName.includes("pay_stub") ||
+    lowerName.includes("pay-stub") ||
+    lowerName.includes("stub") ||
+    lowerName.includes("w2") ||
+    lowerName.includes("w-2") ||
+    lowerName.includes("salary") ||
+    lowerName.includes("earning") ||
+    lowerName.includes("payslip")
   ) {
-    return 'birth_certificate';
+    return "proof_of_income";
   }
 
   if (
-    lowerName.includes('lease') || 
-    lowerName.includes('rental') || 
-    lowerName.includes('rent') || 
-    lowerName.includes('tenancy')
+    lowerName.includes("birth") ||
+    lowerName.includes("certificate") ||
+    lowerName.includes("baby") ||
+    lowerName.includes("child_cert")
   ) {
-    return 'lease_agreement';
+    return "birth_certificate";
   }
 
   if (
-    lowerName.includes('utility') || 
-    lowerName.includes('bill') || 
-    lowerName.includes('electric') || 
-    lowerName.includes('gas') || 
-    lowerName.includes('water') || 
-    lowerName.includes('heating') || 
-    lowerName.includes('sewer')
+    lowerName.includes("lease") ||
+    lowerName.includes("rental") ||
+    lowerName.includes("rent") ||
+    lowerName.includes("tenancy")
   ) {
-    return 'utility_bill';
+    return "lease_agreement";
   }
 
   if (
-    lowerName.includes('bank') || 
-    lowerName.includes('statement') || 
-    lowerName.includes('checking') || 
-    lowerName.includes('savings') ||
-    lowerName.includes('financial')
+    lowerName.includes("utility") ||
+    lowerName.includes("bill") ||
+    lowerName.includes("electric") ||
+    lowerName.includes("gas") ||
+    lowerName.includes("water") ||
+    lowerName.includes("heating") ||
+    lowerName.includes("sewer")
   ) {
-    return 'bank_statement';
+    return "utility_bill";
   }
 
   if (
-    lowerName.includes('medical') || 
-    lowerName.includes('health') || 
-    lowerName.includes('doctor') || 
-    lowerName.includes('disability') || 
-    lowerName.includes('clinical') ||
-    lowerName.includes('vaccin') ||
-    lowerName.includes('immuniz')
+    lowerName.includes("bank") ||
+    lowerName.includes("statement") ||
+    lowerName.includes("checking") ||
+    lowerName.includes("savings") ||
+    lowerName.includes("financial")
   ) {
-    return 'medical_record';
+    return "bank_statement";
   }
 
   if (
-    lowerName.includes('childcare') || 
-    lowerName.includes('provider') || 
-    lowerName.includes('nanny') || 
-    lowerName.includes('daycare') ||
-    lowerName.includes('ccdf')
+    lowerName.includes("medical") ||
+    lowerName.includes("health") ||
+    lowerName.includes("doctor") ||
+    lowerName.includes("disability") ||
+    lowerName.includes("clinical") ||
+    lowerName.includes("vaccin") ||
+    lowerName.includes("immuniz")
   ) {
-    return 'childcare_record';
+    return "medical_record";
   }
 
   if (
-    lowerName.includes('ssn') || 
-    lowerName.includes('social security') || 
-    lowerName.includes('social_security') || 
-    lowerName.includes('ssc')
+    lowerName.includes("childcare") ||
+    lowerName.includes("provider") ||
+    lowerName.includes("nanny") ||
+    lowerName.includes("daycare") ||
+    lowerName.includes("ccdf")
   ) {
-    return 'social_security_card';
+    return "childcare_record";
   }
 
   if (
-    lowerName.includes('immigration') || 
-    lowerName.includes('green card') || 
-    lowerName.includes('greencard') || 
-    lowerName.includes('visa') || 
-    lowerName.includes('ead') || 
-    lowerName.includes('permanent resident')
+    lowerName.includes("ssn") ||
+    lowerName.includes("social security") ||
+    lowerName.includes("social_security") ||
+    lowerName.includes("ssc")
   ) {
-    return 'immigration_document';
+    return "social_security_card";
   }
 
   if (
-    lowerName.includes('school') || 
-    lowerName.includes('enrollment') || 
-    lowerName.includes('student') || 
-    lowerName.includes('class') || 
-    lowerName.includes('transcript')
+    lowerName.includes("immigration") ||
+    lowerName.includes("green card") ||
+    lowerName.includes("greencard") ||
+    lowerName.includes("visa") ||
+    lowerName.includes("ead") ||
+    lowerName.includes("permanent resident")
   ) {
-    return 'school_enrollment';
+    return "immigration_document";
   }
 
   if (
-    lowerName.includes('tax') || 
-    lowerName.includes('return') || 
-    lowerName.includes('1040') || 
-    lowerName.includes('irs')
+    lowerName.includes("school") ||
+    lowerName.includes("enrollment") ||
+    lowerName.includes("student") ||
+    lowerName.includes("class") ||
+    lowerName.includes("transcript")
   ) {
-    return 'tax_return';
+    return "school_enrollment";
   }
 
   if (
-    lowerName.includes('pregnant') || 
-    lowerName.includes('pregnancy') || 
-    lowerName.includes('due date') || 
-    lowerName.includes('due_date') || 
-    lowerName.includes('ultrasound')
+    lowerName.includes("tax") ||
+    lowerName.includes("return") ||
+    lowerName.includes("1040") ||
+    lowerName.includes("irs")
   ) {
-    return 'proof_of_pregnancy';
+    return "tax_return";
   }
 
   if (
-    lowerName.includes('custody') || 
-    lowerName.includes('divorce') || 
-    lowerName.includes('guardianship') || 
-    lowerName.includes('court order') || 
-    lowerName.includes('court_order')
+    lowerName.includes("pregnant") ||
+    lowerName.includes("pregnancy") ||
+    lowerName.includes("due date") ||
+    lowerName.includes("due_date") ||
+    lowerName.includes("ultrasound")
   ) {
-    return 'custody_order';
+    return "proof_of_pregnancy";
+  }
+
+  if (
+    lowerName.includes("custody") ||
+    lowerName.includes("divorce") ||
+    lowerName.includes("guardianship") ||
+    lowerName.includes("court order") ||
+    lowerName.includes("court_order")
+  ) {
+    return "custody_order";
   }
 
   return currentType;
@@ -169,13 +176,13 @@ function classifyDocumentType(fileName: string, currentType: string = 'other'): 
 
 export class DocumentsService {
   async listDocuments(userId: string, role: UserRole) {
-    if (role === 'admin' || role === 'counselor') {
+    if (role === "admin" || role === "counselor") {
       return prisma.document.findMany({
         include: {
           user: { select: { ...userNameSelect, email: true } },
           application: { include: { program: { select: { name: true } } } },
         },
-        orderBy: { uploaded_at: 'desc' },
+        orderBy: { uploaded_at: "desc" },
       });
     }
 
@@ -184,7 +191,7 @@ export class DocumentsService {
       include: {
         application: { include: { program: { select: { name: true } } } },
       },
-      orderBy: { uploaded_at: 'desc' },
+      orderBy: { uploaded_at: "desc" },
     });
   }
 
@@ -197,11 +204,11 @@ export class DocumentsService {
     });
 
     if (!doc) {
-      throw new NotFoundError('Document not found');
+      throw new NotFoundError("Document not found");
     }
 
-    if (role === 'user' && doc.user_id !== userId) {
-      throw new ForbiddenError('Access denied to view this document');
+    if (role === "user" && doc.user_id !== userId) {
+      throw new ForbiddenError("Access denied to view this document");
     }
 
     return doc;
@@ -210,19 +217,29 @@ export class DocumentsService {
   async uploadDocument(
     userId: string,
     file: Express.Multer.File,
-    data: { document_type: string; application_id?: string }
+    data: { document_type: string; application_id?: string },
   ) {
-    const fileExtension = file.originalname.split('.').pop() || '';
+    const fileExtension = file.originalname.split(".").pop() || "";
     const uniqueKey = `documents/${userId}/${crypto.randomUUID()}.${fileExtension}`;
-    const isPlaceholder = env.AWS_ACCESS_KEY_ID.includes('placeholder');
+    const isPlaceholder = env.AWS_ACCESS_KEY_ID.includes("placeholder");
 
-    let file_url = '';
+    let file_url = "";
 
     if (isPlaceholder) {
-      console.log('⚠️ [MOCK S3 UPLOAD] Saving file locally due to placeholder credentials.');
-      const uploadDir = path.join(process.cwd(), 'uploads', 'documents', userId);
+      console.log(
+        "⚠️ [MOCK S3 UPLOAD] Saving file locally due to placeholder credentials.",
+      );
+      const uploadDir = path.join(
+        process.cwd(),
+        "uploads",
+        "documents",
+        userId,
+      );
       fs.mkdirSync(uploadDir, { recursive: true });
-      const localPath = path.join(uploadDir, `${crypto.randomUUID()}.${fileExtension}`);
+      const localPath = path.join(
+        uploadDir,
+        `${crypto.randomUUID()}.${fileExtension}`,
+      );
       fs.writeFileSync(localPath, file.buffer);
       file_url = localPath;
     } else {
@@ -233,12 +250,12 @@ export class DocumentsService {
           Key: uniqueKey,
           Body: file.buffer,
           ContentType: file.mimetype,
-        })
+        }),
       );
     }
 
-    let documentType = data.document_type || 'other';
-    if (documentType === 'other') {
+    let documentType = data.document_type || "other";
+    if (documentType === "other") {
       documentType = classifyDocumentType(file.originalname, documentType);
     }
 
@@ -260,31 +277,38 @@ export class DocumentsService {
 
   async downloadDocument(id: string, userId: string, role: UserRole) {
     const doc = await prisma.document.findUnique({ where: { id } });
-    if (!doc) throw new NotFoundError('Document not found');
-    if (role === 'user' && doc.user_id !== userId) throw new ForbiddenError('Access denied to view this document');
+    if (!doc) throw new NotFoundError("Document not found");
+    if (role === "user" && doc.user_id !== userId)
+      throw new ForbiddenError("Access denied to view this document");
 
-    const isPlaceholder = env.AWS_ACCESS_KEY_ID.includes('placeholder');
+    const isPlaceholder = env.AWS_ACCESS_KEY_ID.includes("placeholder");
 
     if (isPlaceholder) {
       let filePath = doc.file_url;
       if (!fs.existsSync(filePath)) {
         // Fallback: try to resolve relative to process.cwd()
-        const docsIndex = doc.file_url.indexOf('uploads');
+        const docsIndex = doc.file_url.indexOf("uploads");
         if (docsIndex !== -1) {
           const relativePath = doc.file_url.substring(docsIndex);
           const resolvedPath = path.join(process.cwd(), relativePath);
           if (fs.existsSync(resolvedPath)) {
             filePath = resolvedPath;
           } else {
-            const resolvedPathSub = path.join(process.cwd(), 'backend', relativePath);
+            const resolvedPathSub = path.join(
+              process.cwd(),
+              "backend",
+              relativePath,
+            );
             if (fs.existsSync(resolvedPathSub)) {
               filePath = resolvedPathSub;
             } else {
-              throw new NotFoundError(`Local file not found at ${filePath} or ${resolvedPath}`);
+              throw new NotFoundError(
+                `Local file not found at ${filePath} or ${resolvedPath}`,
+              );
             }
           }
         } else {
-          throw new NotFoundError('Local file not found');
+          throw new NotFoundError("Local file not found");
         }
       }
 
@@ -302,7 +326,7 @@ export class DocumentsService {
           new GetObjectCommand({
             Bucket: env.S3_BUCKET_NAME,
             Key: key,
-          })
+          }),
         )) as { Body?: NodeJS.ReadableStream | null };
         return {
           stream: s3Obj.Body ?? null,
@@ -311,8 +335,8 @@ export class DocumentsService {
           size: doc.file_size,
         };
       } catch (err) {
-        console.error('Failed to stream S3 file:', err);
-        throw new NotFoundError('Document file not found in storage');
+        console.error("Failed to stream S3 file:", err);
+        throw new NotFoundError("Document file not found in storage");
       }
     }
   }
@@ -323,14 +347,14 @@ export class DocumentsService {
     });
 
     if (!doc) {
-      throw new NotFoundError('Document not found');
+      throw new NotFoundError("Document not found");
     }
 
-    if (role === 'user' && doc.user_id !== userId) {
-      throw new ForbiddenError('Access denied to delete this document');
+    if (role === "user" && doc.user_id !== userId) {
+      throw new ForbiddenError("Access denied to delete this document");
     }
 
-    const isPlaceholder = env.AWS_ACCESS_KEY_ID.includes('placeholder');
+    const isPlaceholder = env.AWS_ACCESS_KEY_ID.includes("placeholder");
 
     if (isPlaceholder) {
       try {
@@ -338,7 +362,7 @@ export class DocumentsService {
           fs.unlinkSync(doc.file_url);
         }
       } catch (err) {
-        console.error('Failed to delete local file:', err);
+        console.error("Failed to delete local file:", err);
       }
     } else {
       try {
@@ -348,10 +372,10 @@ export class DocumentsService {
           new DeleteObjectCommand({
             Bucket: env.S3_BUCKET_NAME,
             Key: key,
-          })
+          }),
         );
       } catch (err) {
-        console.error('Failed to delete S3 file:', err);
+        console.error("Failed to delete S3 file:", err);
       }
     }
 
@@ -360,22 +384,27 @@ export class DocumentsService {
     });
   }
 
-  async renameDocument(id: string, userId: string, role: UserRole, newName: string) {
+  async renameDocument(
+    id: string,
+    userId: string,
+    role: UserRole,
+    newName: string,
+  ) {
     const doc = await prisma.document.findUnique({
       where: { id },
     });
 
     if (!doc) {
-      throw new NotFoundError('Document not found');
+      throw new NotFoundError("Document not found");
     }
 
-    if (role === 'user' && doc.user_id !== userId) {
-      throw new ForbiddenError('Access denied to rename this document');
+    if (role === "user" && doc.user_id !== userId) {
+      throw new ForbiddenError("Access denied to rename this document");
     }
 
     // Optional: Validate extension. For simplicity, we just save the exact display_name given
     // assuming frontend handles extension logic if needed, or we just trust the string.
-    
+
     const updated = await prisma.document.update({
       where: { id },
       data: { display_name: newName },
