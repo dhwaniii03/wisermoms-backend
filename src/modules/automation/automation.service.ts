@@ -111,7 +111,7 @@ export class AutomationService {
     const applicantName = formatUserName(application.user) || 'Applicant';
     const monthlyIncome = familyProfile ? decimalToNumber(familyProfile.monthly_income) : null;
     const householdSize = familyProfile?.household_size ?? 'Not specified';
-    const city = familyProfile?.city ?? application.user.city ?? 'Not specified';
+    const city = familyProfile?.city ?? 'Not specified';
     const applicantState = application.user.state ?? 'Not specified';
 
     const templateBody = `Dear ${program.agency} Representative,\n\n` +

@@ -298,14 +298,14 @@ export class DocumentsService {
       try {
         const urlObj = new URL(doc.file_url);
         const key = urlObj.pathname.substring(1);
-        const s3Obj = await s3Client.send(
+        const s3Obj = (await s3Client.send(
           new GetObjectCommand({
             Bucket: env.S3_BUCKET_NAME,
             Key: key,
           })
-        );
+        )) as { Body?: NodeJS.ReadableStream | null };
         return {
-          stream: s3Obj.Body,
+          stream: s3Obj.Body ?? null,
           mimeType: doc.mime_type,
           fileName: doc.display_name,
           size: doc.file_size,
