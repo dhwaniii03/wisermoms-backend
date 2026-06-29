@@ -1,0 +1,656 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  user
+  admin
+  counselor
+}
+
+enum UserPlan {
+  community
+  partner
+  network
+}
+
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
+  incomplete
+  trialing
+  unpaid
+}
+
+enum PaymentStatus {
+  succeeded
+  failed
+  pending
+}
+
+enum UserStatus {
+  active
+  inactive
+  flagged
+}
+
+enum EligibilityStatus {
+  qualified
+  likely_qualified
+  check_required
+  not_qualified
+}
+
+enum ApplicationStatus {
+  draft
+  submitted
+  under_review
+  action_required
+  approved
+  rejected
+  withdrawn
+  not_started
+}
+
+enum ApplicationPriority {
+  normal
+  high
+  urgent
+}
+
+enum QuarterDueDateSource {
+  GOVT
+  CALCULATED
+}
+
+model User {
+  id                     String    @id @default(uuid()) @db.Uuid
+  email                  String    @unique
+  password_hash          String    @default("")
+  full_name              String    @default("")
+  phone                  String?
+  role                   UserRole  @default(user)
+  plan                   UserPlan  @default(community)
+  stripe_customer_id     String?
+  stripe_subscription_id String?
+  state                  String?
+  zip_code               String?
+  created_at             DateTime  @default(now()) @db.Timestamptz
+  updated_at             DateTime  @updatedAt @db.Timestamptz
+  last_active_at         DateTime  @default(now()) @db.Timestamptz
+  status                 UserStatus @default(active)
+  profile_picture        String?
+
+  // Relations
+  refresh_tokens         RefreshToken[]
+  family_profile         FamilyProfile?
+  eligibility_results    EligibilityResult[]
+  applications           Application[]       @relation("UserApplications")
+  assigned_applications  Application[]       @relation("AdminAssignedApplications")
+  documents              Document[]          @relation("UserDocuments")
+  notifications          Notification[]
+  deadlines              Deadline[]
+  sessions_as_user       CounselorSession[]  @relation("UserSessions")
+  sessions_as_counselor  CounselorSession[]  @relation("CounselorSessions")
+  audit_logs             AuditLog[]
+  generated_pdfs         GeneratedPdf[]
+  appointments           Appointment[]
+  pdf_generations        PdfGeneration[]
+  reminders              Reminder[]
+  subscriptions          Subscription[]
+  payments               Payment[]
+  billing_events         BillingEvent[]
+
+  @@map("users")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid()) @db.Uuid
+  user_id                String             @db.Uuid
+  user                   User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  stripe_customer_id     String?
+  stripe_subscription_id String?            @unique
+  plan                   UserPlan
+  status                 SubscriptionStatus @default(active)
+  current_period_start   DateTime?          @db.Timestamptz
+  current_period_end     DateTime?          @db.Timestamptz
+  cancel_at_period_end   Boolean            @default(false)
+  created_at             DateTime           @default(now()) @db.Timestamptz
+  updated_at             DateTime           @updatedAt @db.Timestamptz
+
+  payments               Payment[]
+
+  @@index([user_id])
+  @@index([stripe_subscription_id])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                       String        @id @default(uuid()) @db.Uuid
+  user_id                  String        @db.Uuid
+  user                     User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  subscription_id          String?       @db.Uuid
+  subscription             Subscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
+  stripe_payment_intent_id String?       @unique
+  amount                   Int
+  currency                 String        @default("usd")
+  status                   PaymentStatus @default(pending)
+  created_at               DateTime      @default(now()) @db.Timestamptz
+
+  @@index([user_id])
+  @@index([subscription_id])
+  @@map("payments")
+}
+
+model BillingEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  user_id         String?  @db.Uuid
+  user            User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  event_type      String
+  stripe_event_id String   @unique
+  payload         Json
+  created_at      DateTime @default(now()) @db.Timestamptz
+
+  @@index([user_id])
+  @@map("billing_events")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  token      String   @unique
+  user_id    String   @db.Uuid
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  expires_at DateTime @db.Timestamptz
+  revoked    Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  @@index([user_id])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model FamilyProfile {
+  id                     String    @id @default(uuid()) @db.Uuid
+  user_id                String    @unique @db.Uuid
+  user                   User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  // Base fields
+  household_size         Int?
+  num_children           Int?      @map("num_children_under18")
+  children_ages          Json?     // Keep for code compatibility
+  monthly_income         Float?    @map("gross_monthly_income")
+  employment_status      String?
+  housing_status         String?   @map("housing_situation")
+  has_disability         Boolean?  @default(false)
+  is_pregnant            Boolean?  @default(false) @map("pregnant")
+
+  // -- NEW FIELDS FROM WISER MOMS & CLIENT SQL --
+  first_name             String?
+  last_name              String?
+  date_of_birth          DateTime? @db.Date
+  phone                  String?
+  email                  String?
+  preferred_language     String?   @default("en") @map("language_preference")
+  street_address         String?
+  apartment_suite        String?
+  city                   String?
+  state                  String?   @default("GA")
+  zip_code               String?
+  monthly_rent           Decimal?  @db.Decimal
+  monthly_utilities      Decimal?  @db.Decimal
+  landlord_name          String?
+  eviction_risk          Boolean?  @default(false) @map("eviction_notice")
+  income_sources         String[]  @default([])
+  other_household_income Boolean?  @default(false)
+  children_dobs          String[]  @default([])
+  child_disability       Boolean?  @default(false)
+  marital_status         String?
+  other_adults           Boolean?  @default(false)
+  needs_childcare        Boolean?  @default(false)
+  has_health_insurance   Boolean?  @default(false)
+  immigration_status     String?
+  legal_issues           String[]  @default([])
+  urgency                String?   @map("urgency_level")
+  has_savings            Boolean?  @default(false)
+  domestic_violence      Boolean?  @default(false)
+
+  // Additional fields added back for code compatibility
+  chronic_illness        Boolean?  @default(false)
+  health_insurance       String?
+  savings_assets         String?
+  monthly_childcare_cost Decimal?  @db.Decimal
+  employer_name          String?
+  child_support_status   String?
+  childcare_preference   String?
+  childcare_provider     String?
+  ssn_last_four          String?
+  work_situation         String?
+  
+  county                        String?
+  postpartum_months_since_birth Int?
+  breastfeeding                 Boolean   @default(false)
+  children_under_5_count        Int       @default(0)
+  has_medicaid                  Boolean   @default(false)
+  has_snap                      Boolean   @default(false)
+  has_tanf_work_first           Boolean   @default(false)
+  has_ssi                       Boolean   @default(false)
+  has_non_custodial_parent      Boolean   @default(false)
+  us_citizen                    Boolean   @default(true)
+  qualified_immigrant           Boolean   @default(false)
+  work_activity_hrs_per_month   Int       @default(0)
+  in_qualifying_activity        Boolean   @default(false)
+  previously_denied_medicaid    Boolean   @default(false)
+  intake_snapshot               Json?
+  preferred_contact             String    @default("email")
+  consent_data_use              Boolean   @default(false)
+  intake_completed_at           DateTime? @db.Timestamptz
+
+  created_at             DateTime  @default(now()) @db.Timestamptz
+  updated_at             DateTime  @updatedAt @db.Timestamptz
+
+  @@map("profiles")
+}
+
+model BenefitProgram {
+  id                          String   @id @default(uuid())
+  name                        String   @map("program_name")
+  agency                      String   @map("administering_agency")
+  program_type                String
+  federal_or_state            String?  // e.g. "federal" or "state"
+  state_code                  String?  @map("state")
+  description                 String?
+  eligibility_criteria        Json?     // JSON object describing criteria
+  estimated_monthly_value_min Float?
+  estimated_monthly_value_max Float?
+  application_url             String?  @map("apply_url")
+  contact_email               String?
+  is_active                   Boolean  @default(true)
+  tags                        String[] @default([])
+  metadata                    Json?
+
+  also_known_as               String?
+  agency_phone                String?
+  agency_website              String?
+  eligibility_summary         String?
+  income_limit_pct_fpl        Decimal? @db.Decimal
+  income_limit_pct_smi        Decimal? @db.Decimal
+  asset_limit                 Decimal? @db.Decimal
+  lifetime_limit_months       Int?
+  work_requirement_hrs        Int?
+  renewal_period              String?
+  counties_served             String[] @default([])
+  languages_available         String[] @default([])
+  waitlist_status             String?  @default("open")
+  waitlist_notes              String?
+  last_verified_date          DateTime? @db.Date
+  source_url                  String?
+  guide_url                   String?
+  renewal_period_months       Int?
+  program_code                String?
+  program_due_date            DateTime? @db.Date
+  notes                       String?
+
+  created_at                  DateTime @default(now()) @db.Timestamptz
+  updated_at                  DateTime @updatedAt @db.Timestamptz
+
+  // Relations
+  eligibility_results         EligibilityResult[]
+  applications                Application[]
+  generated_pdfs              GeneratedPdf[]
+  application_guides          ApplicationGuide[]
+  documents_required          DocumentRequired[]
+  income_thresholds           IncomeThreshold[]
+  reminders                   Reminder[]
+  quarter_due_dates           ProgramQuarterDueDate[]
+
+  @@map("programs")
+}
+
+model ProgramQuarterDueDate {
+  id             String                @id @default(uuid()) @db.Uuid
+  program_id     String
+  program        BenefitProgram        @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  year           Int
+  quarter        String                // Q1, Q2, Q3, Q4
+  due_dates_json Json                  @default("[]")
+  source         QuarterDueDateSource?
+  created_at     DateTime              @default(now()) @db.Timestamptz
+  updated_at     DateTime              @updatedAt @db.Timestamptz
+
+  @@unique([program_id, year, quarter])
+  @@index([program_id])
+  @@index([year])
+  @@map("program_quarter_due_dates")
+}
+
+model EligibilityResult {
+  id               String            @id @default(uuid()) @db.Uuid
+  user_id          String            @db.Uuid
+  user             User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  program_id       String
+  program          BenefitProgram    @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  status           EligibilityStatus @default(check_required)
+  confidence_score Float             @default(0) // 0-100
+  reasoning        String            @default("") @db.Text
+  checked_at       DateTime          @default(now())
+
+  org_id           String?           @db.Uuid
+  organization     Organization?     @relation(fields: [org_id], references: [id])
+  match_type       String?
+  eligibility      String?
+  estimated_benefit Decimal?         @db.Decimal
+  match_reason     String?
+  ai_rank          Int?
+  reasons          String[]          @default([])
+  program_code     String?
+  created_at       DateTime?         @default(now()) @db.Timestamptz
+
+  @@unique([user_id, program_id])
+  @@index([user_id])
+  @@index([program_id])
+  @@map("results")
+}
+
+model Application {
+  id                String              @id @default(uuid()) @db.Uuid
+  user_id           String              @db.Uuid
+  user              User                @relation("UserApplications", fields: [user_id], references: [id], onDelete: Cascade)
+  program_id        String?
+  program           BenefitProgram?     @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  status            String              @default("draft")
+  submitted_at      DateTime?
+  last_updated_at   DateTime            @default(now()) @updatedAt
+  notes             String?             @db.Text
+  assigned_admin_id String?             @db.Uuid
+  assigned_admin    User?               @relation("AdminAssignedApplications", fields: [assigned_admin_id], references: [id], onDelete: SetNull)
+  priority          String              @default("normal")
+  pdf_generated     Boolean?            @default(false)
+  created_at        DateTime?           @default(now()) @db.Timestamptz
+  updated_at        DateTime?           @default(now()) @db.Timestamptz
+
+  // Relations
+  documents         Document[]
+  notifications     Notification[]
+  deadlines         Deadline[]
+  generated_pdfs    GeneratedPdf[]
+
+  @@index([user_id])
+  @@index([program_id])
+  @@map("applications")
+}
+
+model Document {
+  id                 String       @id @default(uuid()) @db.Uuid
+  user_id            String       @db.Uuid
+  user               User         @relation("UserDocuments", fields: [user_id], references: [id], onDelete: Cascade)
+  application_id     String?      @db.Uuid
+  application        Application? @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  document_type      String       // e.g. "birth_certificate", "proof_of_income"
+  original_file_name String       @default("unnamed_file") @map("file_name")
+  display_name       String       @default("Unnamed Document")
+  file_url           String       @map("storage_path") // S3 URL
+  file_size          Int?
+  mime_type          String?
+  uploaded_at        DateTime     @default(now()) @db.Timestamptz
+
+  @@map("documents")
+}
+
+model Notification {
+  id                     String       @id @default(uuid()) @db.Uuid
+  user_id                String       @db.Uuid
+  user                   User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  type                   String       // deadline, status_update, document_required, system
+  title                  String
+  message                String       @db.Text
+  is_read                Boolean      @default(false)
+  created_at             DateTime     @default(now()) @db.Timestamptz
+  related_application_id String?      @db.Uuid
+  application            Application? @relation(fields: [related_application_id], references: [id], onDelete: SetNull)
+  action_url             String?
+
+  @@map("notifications")
+}
+
+model Deadline {
+  id               String      @id @default(uuid()) @db.Uuid
+  user_id          String      @db.Uuid
+  user             User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  application_id   String      @db.Uuid
+  application      Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  deadline_type    String      // renewal, document_upload, recertification
+  due_date         DateTime
+  reminder_sent_at DateTime?
+  is_completed     Boolean     @default(false)
+
+  @@map("deadlines")
+}
+
+model CounselorSession {
+  id               String   @id @default(uuid()) @db.Uuid
+  user_id          String   @db.Uuid
+  user             User     @relation("UserSessions", fields: [user_id], references: [id], onDelete: Cascade)
+  counselor_id     String   @db.Uuid
+  counselor        User     @relation("CounselorSessions", fields: [counselor_id], references: [id], onDelete: Cascade)
+  scheduled_at     DateTime
+  duration_minutes Int      @default(30)
+  status           String   // scheduled, completed, cancelled
+  notes            String?  @db.Text
+  meeting_url      String?
+
+  @@map("counselor_sessions")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  admin_id    String   @db.Uuid
+  admin       User     @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  action      String
+  target_type String
+  target_id   String
+  metadata    Json?
+  created_at  DateTime @default(now()) @db.Timestamptz
+
+  @@map("audit_logs")
+}
+
+model GeneratedPdf {
+  id              String      @id @default(uuid()) @db.Uuid
+  user_id         String      @db.Uuid
+  user            User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  application_id  String?     @db.Uuid
+  application     Application? @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  program_id      String
+  program         BenefitProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  file_url        String      // S3 key or local path
+  file_size       Int
+  version         Int         @default(1)
+  quarter         String?     // Q1, Q2, Q3, Q4
+  year            Int?
+  status          String      @default("generated") // generated | attached | sent
+  validation_report Json?     // missing fields/docs at generation time
+  generated_at    DateTime    @default(now()) @db.Timestamptz
+
+  @@index([user_id])
+  @@index([program_id])
+  @@index([user_id, program_id, quarter, year])
+  @@map("generated_pdfs")
+}
+
+model AccountDeletionRequest {
+  id           String    @id @default(uuid()) @db.Uuid
+  user_id      String    @db.Uuid
+  requested_at DateTime  @default(now()) @db.Timestamptz
+  completed_at DateTime? @db.Timestamptz
+  status       String    @default("pending")
+  error_message String?
+
+  @@map("account_deletion_requests")
+}
+
+model ApplicationGuide {
+  id            String      @id @default(uuid()) @db.Uuid
+  program_id    String?
+  program       BenefitProgram? @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  guide_name    String
+  overview      String?
+  apply_url     String?
+  phone         String?
+  last_verified DateTime?   @db.Date
+  source_url    String?
+  created_at    DateTime?   @default(now()) @db.Timestamptz
+  state         String      @default("GA")
+
+  // Relations
+  steps         GuideStep[]
+
+  @@map("application_guides")
+}
+
+model GuideStep {
+  id            String           @id @default(uuid()) @db.Uuid
+  guide_id      String           @db.Uuid
+  guide         ApplicationGuide @relation(fields: [guide_id], references: [id], onDelete: Cascade)
+  step_number   Int
+  title         String
+  description   String
+  plain_english String?
+  tip           String?
+  url           String?
+  created_at    DateTime?        @default(now()) @db.Timestamptz
+
+  @@map("guide_steps")
+}
+
+model Appointment {
+  id               String        @id @default(uuid()) @db.Uuid
+  user_id          String        @db.Uuid
+  user             User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  org_id           String?       @db.Uuid
+  organization     Organization? @relation(fields: [org_id], references: [id])
+  agency_name      String?
+  appointment_date DateTime?     @db.Timestamptz
+  notes            String?
+  created_at       DateTime?     @default(now()) @db.Timestamptz
+
+  @@map("appointments")
+}
+
+model DocumentRequired {
+  id            String         @id @default(uuid()) @db.Uuid
+  program_id    String
+  program       BenefitProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  document_name String
+  description   String?
+  required      Boolean        @default(true)
+  conditional_on String?
+  created_at    DateTime?      @default(now()) @db.Timestamptz
+
+  @@map("documents_required")
+}
+
+model IncomeThreshold {
+  id             String         @id @default(uuid()) @db.Uuid
+  program_id     String
+  program        BenefitProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  household_size Int
+  income_limit   Decimal?       @db.Decimal
+  income_limit_yr Decimal?      @db.Decimal
+  benefit_amount Decimal?       @db.Decimal
+  co_pay         Decimal?       @db.Decimal
+  notes          String?
+  created_at     DateTime?      @default(now()) @db.Timestamptz
+
+  @@map("income_thresholds")
+}
+
+model Organization {
+  id                String       @id @default(uuid()) @db.Uuid
+  org_name          String
+  category          String
+  purpose           String?
+  phone             String?
+  crisis_line       String?
+  email             String?
+  website           String?
+  address           String?
+  city              String?      @default("Atlanta")
+  state             String?      @default("GA")
+  zip_code          String?
+  counties_served   String[]     @default([])
+  populations_served String[]    @default([])
+  languages_served  String[]     @default([])
+  intake_process    String?
+  hours_of_operation String?
+  flag_dv           Boolean      @default(false)
+  flag_eviction     Boolean      @default(false)
+  flag_children_u5  Boolean      @default(false)
+  flag_pregnant     Boolean      @default(false)
+  flag_student      Boolean      @default(false)
+  flag_immigrant    Boolean      @default(false)
+  flag_no_childcare Boolean      @default(false)
+  dv_safety_mode    Boolean      @default(false)
+  partner_tier      String?
+  last_verified_date DateTime?   @db.Date
+  source_url        String?
+  active            Boolean      @default(true)
+  created_at        DateTime?    @default(now()) @db.Timestamptz
+  updated_at        DateTime?    @default(now()) @db.Timestamptz
+  service_tags      String[]     @default([])
+  referral_notes    String?
+
+  // Relations
+  services          OrgService[]
+  results           EligibilityResult[]
+  appointments      Appointment[]
+
+  @@map("organizations")
+}
+
+model OrgService {
+  id           String       @id @default(uuid()) @db.Uuid
+  org_id       String       @db.Uuid
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  service_type String
+  notes        String?
+  created_at   DateTime?    @default(now()) @db.Timestamptz
+
+  @@map("org_services")
+}
+
+model PdfGeneration {
+  id            String    @id @default(uuid()) @db.Uuid
+  user_id       String    @db.Uuid
+  user          User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  program_code  String
+  program_name  String?
+  state         String
+  language      String    @default("en")
+  template_used String?
+  storage_path  String?
+  generated_at  DateTime  @default(now()) @db.Timestamptz
+
+  @@map("pdf_generations")
+}
+
+model Reminder {
+  id            String         @id @default(uuid()) @db.Uuid
+  user_id       String         @db.Uuid
+  user          User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  program_id    String?
+  program       BenefitProgram? @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  program_name  String?
+  renewal_date  DateTime       @db.Date
+  reminder_date DateTime?      @db.Date
+  dismissed     Boolean        @default(false)
+  created_at    DateTime?      @default(now()) @db.Timestamptz
+
+  @@map("reminders")
+}

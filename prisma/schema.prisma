@@ -1,0 +1,1045 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                     String               @id @default(uuid()) @db.Uuid
+  email                  String               @unique
+  password_hash          String               @default("")
+  phone                  String?
+  role                   UserRole             @default(user)
+  stripe_customer_id     String?
+  stripe_subscription_id String?
+  state                  String?
+  zip_code               String?
+  created_at             DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime             @updatedAt @db.Timestamptz(6)
+  last_active_at         DateTime             @default(now()) @db.Timestamptz(6)
+  status                 UserStatus           @default(active)
+  profile_picture        String?
+  org_id                 String?              @db.Uuid
+  org_type               String?
+  first_name             String               @default("")
+  middle_name            String?
+  last_name              String               @default("")
+  assigned_applications  Application[]        @relation("AdminAssignedApplications")
+  applications           Application[]        @relation("UserApplications")
+  application_submissions ApplicationSubmission[]
+  appointments           Appointment[]
+  audit_logs             AuditLog[]
+  billing_events         BillingEvent[]
+  sessions_as_counselor  CounselorSession[]   @relation("CounselorSessions")
+  sessions_as_user       CounselorSession[]   @relation("UserSessions")
+  deadlines              Deadline[]
+  documents              Document[]           @relation("UserDocuments")
+  generated_pdfs         GeneratedPdf[]
+  mother_profile         Mother?              @relation("MotherUser")
+  notifications          Notification[]
+  payments               Payment[]
+  pdf_generations        PdfGeneration[]
+  family_profile         FamilyProfile?
+  refresh_tokens         RefreshToken[]
+  reminders              Reminder[]
+  eligibility_results    EligibilityResult[]
+  subscriptions          Subscription[]
+  organization           Organization?        @relation(fields: [org_id], references: [id], onDelete: SetNull)
+  billing_organization   Organization?        @relation("OrganizationBillingUser")
+
+  @@index([org_id])
+  @@map("users")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid()) @db.Uuid
+  user_id                String             @db.Uuid
+  stripe_customer_id     String?
+  stripe_subscription_id String?            @unique
+  plan                   UserPlan
+  status                 SubscriptionStatus @default(active)
+  current_period_start   DateTime?          @db.Timestamptz(6)
+  current_period_end     DateTime?          @db.Timestamptz(6)
+  cancel_at_period_end   Boolean            @default(false)
+  created_at             DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime           @updatedAt @db.Timestamptz(6)
+  payments               Payment[]
+  user                   User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([stripe_subscription_id])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                       String        @id @default(uuid()) @db.Uuid
+  user_id                  String        @db.Uuid
+  subscription_id          String?       @db.Uuid
+  stripe_payment_intent_id String?       @unique
+  amount                   Int
+  currency                 String        @default("usd")
+  status                   PaymentStatus @default(pending)
+  created_at               DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime      @default(now()) @db.Timestamptz(6)
+  subscription             Subscription? @relation(fields: [subscription_id], references: [id])
+  user                     User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([subscription_id])
+  @@map("payments")
+}
+
+model BillingEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  user_id         String?  @db.Uuid
+  event_type      String
+  stripe_event_id String   @unique
+  payload         Json
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+  user            User?    @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@map("billing_events")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  token      String   @unique
+  user_id    String   @db.Uuid
+  expires_at DateTime @db.Timestamptz(6)
+  revoked    Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model FamilyProfile {
+  id                            String    @id @default(uuid()) @db.Uuid
+  user_id                       String    @unique @db.Uuid
+  household_size                Int?
+  num_children                  Int?      @map("num_children_under18")
+  children_ages                 Json?
+  monthly_income                Decimal?  @map("gross_monthly_income") @db.Decimal(10, 2)
+  employment_status             String?
+  housing_status                String?   @map("housing_situation")
+  has_disability                Boolean?  @default(false)
+  is_pregnant                   Boolean?  @default(false) @map("pregnant")
+  first_name                    String?
+  last_name                     String?
+  date_of_birth                 DateTime? @db.Date
+  phone                         String?
+  email                         String?
+  preferred_language            String?   @default("en") @map("language_preference")
+  street_address                String?
+  apartment_suite               String?
+  city                          String?
+  state                         String?   @default("GA")
+  zip_code                      String?
+  monthly_rent                  Decimal?  @db.Decimal(10, 2)
+  monthly_utilities             Decimal?  @db.Decimal(10, 2)
+  landlord_name                 String?
+  eviction_risk                 Boolean?  @default(false) @map("eviction_notice")
+  income_sources                String[]  @default([])
+  other_household_income        Boolean?  @default(false)
+  children_dobs                 String[]  @default([])
+  child_disability              Boolean?  @default(false)
+  marital_status                String?
+  other_adults                  Boolean?  @default(false)
+  needs_childcare               Boolean?  @default(false)
+  has_health_insurance          Boolean?  @default(false)
+  immigration_status            String?
+  legal_issues                  String[]  @default([])
+  urgency                       String?   @map("urgency_level")
+  has_savings                   Boolean?  @default(false)
+  domestic_violence             Boolean?  @default(false)
+  county                        String?
+  postpartum_months_since_birth Int?
+  breastfeeding                 Boolean   @default(false)
+  children_under_5_count        Int       @default(0)
+  has_medicaid                  Boolean   @default(false)
+  has_snap                      Boolean   @default(false)
+  has_tanf_work_first           Boolean   @default(false)
+  has_ssi                       Boolean   @default(false)
+  has_non_custodial_parent      Boolean   @default(false)
+  us_citizen                    Boolean   @default(true)
+  qualified_immigrant           Boolean   @default(false)
+  work_activity_hrs_per_month   Int       @default(0)
+  in_qualifying_activity        Boolean   @default(false)
+  previously_denied_medicaid    Boolean   @default(false)
+  intake_snapshot               Json?
+  preferred_contact             String    @default("email")
+  consent_data_use              Boolean   @default(false)
+  intake_completed_at           DateTime? @db.Timestamptz(6)
+  last_eligibility_scan_at      DateTime? @db.Timestamptz(6)
+  created_at                    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime  @updatedAt @db.Timestamptz(6)
+  child_support_status          String?
+  childcare_preference          String?
+  childcare_provider            String?
+  chronic_illness               Boolean?  @default(false)
+  employer_name                 String?
+  health_insurance              String?
+  monthly_childcare_cost        Decimal?  @db.Decimal(10, 2)
+  savings_assets                String?
+  ssn_last_four                 String?
+  work_situation                String?
+  typical_work_hours            String[]  @default([])
+  user                          User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([state], map: "idx_profiles_state")
+  @@map("profiles")
+}
+
+model BenefitProgram {
+  id                          String                  @id @default(uuid())
+  name                        String                  @map("program_name")
+  agency                      String                  @map("administering_agency")
+  program_type                String
+  federal_or_state            String?
+  state_code                  String?                 @map("state")
+  description                 String?
+  eligibility_criteria        Json?
+  estimated_monthly_value_min Float?
+  estimated_monthly_value_max Float?
+  application_url             String?                 @map("apply_url")
+  contact_email               String?
+  is_active                   Boolean                 @default(true)
+  tags                        String[]                @default([])
+  metadata                    Json?
+  also_known_as               String?
+  agency_phone                String?
+  agency_website              String?
+  eligibility_summary         String?
+  income_limit_pct_fpl        Decimal?                @db.Decimal
+  income_limit_pct_smi        Decimal?                @db.Decimal
+  asset_limit                 Decimal?                @db.Decimal
+  lifetime_limit_months       Int?
+  work_requirement_hrs        Int?
+  renewal_period              String?
+  counties_served             String[]                @default([])
+  languages_available         String[]                @default([])
+  waitlist_status             String?                 @default("open")
+  waitlist_notes              String?
+  last_verified_date          DateTime?               @db.Date
+  source_url                  String?
+  guide_url                   String?
+  renewal_period_months       Int?
+  program_code                String?
+  notes                       String?
+  created_at                  DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime                @updatedAt @db.Timestamptz(6)
+  program_due_date            DateTime?               @db.Date
+  application_guides          ApplicationGuide[]
+  applications                Application[]
+  partner_cases               PartnerCase[]           @relation("PartnerCaseProgram")
+  documents_required          DocumentRequired[]
+  generated_pdfs              GeneratedPdf[]
+  income_thresholds           IncomeThreshold[]
+  quarter_due_dates           ProgramQuarterDueDate[]
+  reminders                   Reminder[]
+  eligibility_results         EligibilityResult[]
+
+  @@index([is_active])
+  @@index([federal_or_state])
+  @@index([state_code], map: "idx_programs_state")
+  @@index([state_code], map: "programs_state_code_idx")
+  @@map("programs")
+}
+
+model ProgramQuarterDueDate {
+  id             String                @id @default(uuid()) @db.Uuid
+  program_id     String
+  year           Int
+  quarter        String
+  due_dates_json Json                  @default("[]")
+  source         QuarterDueDateSource?
+  created_at     DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime              @updatedAt @db.Timestamptz(6)
+  program        BenefitProgram        @relation(fields: [program_id], references: [id], onDelete: Cascade)
+
+  @@unique([program_id, year, quarter])
+  @@index([program_id])
+  @@index([year])
+  @@map("program_quarter_due_dates")
+}
+
+model EligibilityResult {
+  id                String            @id @default(uuid()) @db.Uuid
+  user_id           String            @db.Uuid
+  program_id        String
+  status            EligibilityStatus @default(check_required)
+  confidence_score  Float             @default(0)
+  reasoning         String            @default("")
+  checked_at        DateTime          @default(now())
+  org_id            String?           @db.Uuid
+  match_type        String?
+  eligibility       String?
+  estimated_benefit Decimal?          @db.Decimal
+  match_reason      String?
+  ai_rank           Int?
+  reasons           String[]          @default([])
+  program_code      String?
+  created_at        DateTime?         @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime          @default(now()) @db.Timestamptz(6)
+  ai_processed      Boolean           @default(false)
+  organization Organization?  @relation(fields: [org_id], references: [id])
+  program      BenefitProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  user                   User                   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, program_id])
+  @@index([user_id])
+  @@index([program_id])
+  @@map("results")
+}
+
+model Application {
+  id                String          @id @default(uuid()) @db.Uuid
+  user_id           String          @db.Uuid
+  program_id        String?
+  status            String          @default("draft")
+  submitted_at      DateTime?
+  last_updated_at   DateTime        @default(now()) @updatedAt
+  notes             String?
+  assigned_admin_id String?         @db.Uuid
+  priority          String          @default("normal")
+  pdf_generated     Boolean?        @default(false)
+  quarter           String?
+  year              Int?
+  created_at        DateTime?       @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?       @default(now()) @db.Timestamptz(6)
+  assigned_admin    User?           @relation("AdminAssignedApplications", fields: [assigned_admin_id], references: [id])
+  program           BenefitProgram? @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  user              User            @relation("UserApplications", fields: [user_id], references: [id], onDelete: Cascade)
+  deadlines         Deadline[]
+  documents         Document[]
+  generated_pdfs    GeneratedPdf[]
+  notifications     Notification[]
+  submissions       ApplicationSubmission[]
+  partner_cases     PartnerCase[]
+
+  @@index([user_id])
+  @@index([program_id])
+  @@map("applications")
+}
+
+model ApplicationSubmission {
+  id               String        @id @default(uuid()) @db.Uuid
+  application_id   String        @db.Uuid
+  user_id          String        @db.Uuid
+  generated_pdf_id String?       @db.Uuid
+  document_ids     String[]      @default([])
+  submitted_at     DateTime      @default(now()) @db.Timestamptz(6)
+  profile_snapshot    Json?
+  profile_snapshot_at DateTime?  @db.Timestamptz(6)
+  application      Application   @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  generated_pdf    GeneratedPdf? @relation(fields: [generated_pdf_id], references: [id], onDelete: SetNull)
+  user             User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([application_id])
+  @@index([user_id])
+  @@map("application_submissions")
+}
+
+model Document {
+  id                 String       @id @default(uuid()) @db.Uuid
+  user_id            String       @db.Uuid
+  application_id     String?      @db.Uuid
+  document_type      String
+  original_file_name String       @default("unnamed_file") @map("file_name")
+  display_name       String       @default("Unnamed Document")
+  file_url           String       @map("storage_path")
+  file_size          Int?
+  mime_type          String?
+  uploaded_at        DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime     @default(now()) @db.Timestamptz(6)
+  application        Application? @relation(fields: [application_id], references: [id])
+  user               User         @relation("UserDocuments", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+model Notification {
+  id                     String       @id @default(uuid()) @db.Uuid
+  user_id                String       @db.Uuid
+  type                   String
+  title                  String
+  message                String
+  is_read                Boolean      @default(false)
+  created_at             DateTime     @default(now()) @db.Timestamptz(6)
+  related_application_id String?      @db.Uuid
+  action_url             String?
+  updated_at             DateTime     @default(now()) @db.Timestamptz(6)
+  application            Application? @relation(fields: [related_application_id], references: [id])
+  user                   User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id], map: "idx_notifications_user_id")
+  @@map("notifications")
+}
+
+model Deadline {
+  id               String      @id @default(uuid()) @db.Uuid
+  user_id          String      @db.Uuid
+  application_id   String      @db.Uuid
+  deadline_type    String
+  due_date         DateTime
+  reminder_sent_at DateTime?
+  is_completed     Boolean     @default(false)
+  updated_at       DateTime    @default(now()) @db.Timestamptz(6)
+  application      Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  user             User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("deadlines")
+}
+
+model CounselorSession {
+  id               String   @id @default(uuid()) @db.Uuid
+  user_id          String   @db.Uuid
+  counselor_id     String   @db.Uuid
+  scheduled_at     DateTime
+  duration_minutes Int      @default(30)
+  status           String
+  notes            String?
+  meeting_url      String?
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+  counselor        User     @relation("CounselorSessions", fields: [counselor_id], references: [id], onDelete: Cascade)
+  user             User     @relation("UserSessions", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("counselor_sessions")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  admin_id    String   @db.Uuid
+  action      String
+  target_type String
+  target_id   String
+  metadata    Json?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  admin       User     @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+model GeneratedPdf {
+  id                String         @id @default(uuid()) @db.Uuid
+  user_id           String         @db.Uuid
+  application_id    String?        @db.Uuid
+  program_id        String
+  file_url          String
+  file_size         Int
+  version           Int            @default(1)
+  status            String         @default("generated")
+  validation_report Json?
+  generated_at      DateTime       @default(now()) @db.Timestamptz(6)
+  quarter           String?
+  year              Int?
+  updated_at        DateTime       @default(now()) @db.Timestamptz(6)
+  application       Application?   @relation(fields: [application_id], references: [id])
+  program           BenefitProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  user              User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  submissions       ApplicationSubmission[]
+
+  @@index([user_id])
+  @@index([program_id])
+  @@index([user_id, program_id, quarter, year])
+  @@map("generated_pdfs")
+}
+
+model AccountDeletionRequest {
+  id            String    @id @default(uuid()) @db.Uuid
+  user_id       String    @db.Uuid
+  requested_at  DateTime  @default(now()) @db.Timestamptz(6)
+  completed_at  DateTime? @db.Timestamptz(6)
+  status        String    @default("pending")
+  error_message String?
+  updated_at    DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@map("account_deletion_requests")
+}
+
+model ApplicationGuide {
+  id            String          @id @default(uuid()) @db.Uuid
+  program_id    String?
+  guide_name    String
+  overview      String?
+  apply_url     String?
+  phone         String?
+  last_verified DateTime?       @db.Date
+  source_url    String?
+  created_at    DateTime?       @default(now()) @db.Timestamptz(6)
+  state         String          @default("GA")
+  updated_at    DateTime        @default(now()) @db.Timestamptz(6)
+  program       BenefitProgram? @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  steps         GuideStep[]
+
+  @@map("application_guides")
+}
+
+model GuideStep {
+  id            String           @id @default(uuid()) @db.Uuid
+  guide_id      String           @db.Uuid
+  step_number   Int
+  title         String
+  description   String
+  plain_english String?
+  tip           String?
+  url           String?
+  created_at    DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime         @default(now()) @db.Timestamptz(6)
+  guide         ApplicationGuide @relation(fields: [guide_id], references: [id], onDelete: Cascade)
+
+  @@map("guide_steps")
+}
+
+model Appointment {
+  id               String        @id @default(uuid()) @db.Uuid
+  user_id          String        @db.Uuid
+  org_id           String?       @db.Uuid
+  agency_name      String?
+  appointment_date DateTime?     @db.Timestamptz(6)
+  notes            String?
+  created_at       DateTime?     @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @default(now()) @db.Timestamptz(6)
+  organization Organization? @relation(fields: [org_id], references: [id])
+  user         User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("appointments")
+}
+
+model DocumentRequired {
+  id             String         @id @default(uuid()) @db.Uuid
+  program_id     String
+  document_name  String
+  description    String?
+  required       Boolean        @default(true)
+  conditional_on String?
+  created_at     DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime       @default(now()) @db.Timestamptz(6)
+  program        BenefitProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+
+  @@map("documents_required")
+}
+
+model IncomeThreshold {
+  id              String         @id @default(uuid()) @db.Uuid
+  program_id      String
+  household_size  Int
+  income_limit    Decimal?       @db.Decimal
+  income_limit_yr Decimal?       @db.Decimal
+  benefit_amount  Decimal?       @db.Decimal
+  co_pay          Decimal?       @db.Decimal
+  notes           String?
+  created_at      DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime       @default(now()) @db.Timestamptz(6)
+  program         BenefitProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+
+  @@index([program_id], map: "idx_income_thresholds_program_id")
+  @@map("income_thresholds")
+}
+
+model Organization {
+  id                 String              @id @default(uuid()) @db.Uuid
+  org_name           String
+  category           String
+  purpose            String?
+  phone              String?
+  crisis_line        String?
+  email              String?
+  website            String?
+  address            String?
+  city               String?             @default("Atlanta")
+  state              String?             @default("GA")
+  zip_code           String?
+  county             String?
+  counties_served    String[]            @default([])
+  populations_served String[]            @default([])
+  languages_served   String[]            @default([])
+  intake_process     String?
+  hours_of_operation String?
+  flag_dv            Boolean             @default(false)
+  flag_eviction      Boolean             @default(false)
+  flag_children_u5   Boolean             @default(false)
+  flag_pregnant      Boolean             @default(false)
+  flag_student       Boolean             @default(false)
+  flag_immigrant     Boolean             @default(false)
+  flag_no_childcare  Boolean             @default(false)
+  dv_safety_mode     Boolean             @default(false)
+  partner_tier       String?
+  last_verified_date DateTime?           @db.Date
+  source_url         String?
+  active             Boolean             @default(true)
+  created_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  service_tags       String[]            @default([])
+  referral_notes           String?
+  org_type                 String?
+  billing_user_id          String?             @unique @db.Uuid
+  onboarding_completed     Boolean             @default(false)
+  tagline                  String?
+  description              String?
+  services_offered         String?
+  service_area             String?
+  primary_language         String?             @default("English")
+  notification_frequency   String?             @default("daily")
+  case_numbering_prefix    String?             @default("CASE")
+  country                  String?
+  employees                String?
+  founded                  String?
+  tax_id                   String?
+  linkedin                 String?
+  contact_email            String?
+  appointments             Appointment[]
+  services                 OrgService[]
+  results                  EligibilityResult[]
+  users                    User[]
+  org_users                OrgUser[]           @relation("OrgUserOrganization")
+  billing_user             User?               @relation("OrganizationBillingUser", fields: [billing_user_id], references: [id], onDelete: SetNull)
+
+  @@index([dv_safety_mode], map: "idx_organizations_dv_safety_mode")
+  @@index([state], map: "idx_organizations_state")
+  @@index([org_type], map: "idx_organizations_org_type")
+  @@map("organizations")
+}
+
+model OrgService {
+  id           String       @id @default(uuid()) @db.Uuid
+  org_id       String       @db.Uuid
+  service_type String
+  notes        String?
+  created_at   DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime     @default(now()) @db.Timestamptz(6)
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@map("org_services")
+}
+
+model PdfGeneration {
+  id            String   @id @default(uuid()) @db.Uuid
+  user_id       String   @db.Uuid
+  program_code  String
+  program_name  String?
+  state         String
+  language      String   @default("en")
+  template_used String?
+  storage_path  String?
+  generated_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("pdf_generations")
+}
+
+model Reminder {
+  id            String          @id @default(uuid()) @db.Uuid
+  user_id       String          @db.Uuid
+  program_id    String?
+  program_name  String?
+  renewal_date  DateTime        @db.Date
+  reminder_date DateTime?       @db.Date
+  dismissed     Boolean         @default(false)
+  created_at    DateTime?       @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime        @default(now()) @db.Timestamptz(6)
+  program       BenefitProgram? @relation(fields: [program_id], references: [id], onDelete: Cascade)
+  user          User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("reminders")
+}
+
+model OrgUser {
+  id                   String              @id @default(uuid()) @db.Uuid
+  full_name            String
+  email                String              @unique
+  role                 OrgUserRole         @default(caseworker)
+  org_id               String              @db.Uuid
+  caseload_capacity    Int?
+  is_active            Boolean             @default(true)
+  created_at           DateTime            @default(now()) @db.Timestamptz(6)
+  last_login           DateTime?           @db.Timestamptz(6)
+  password_hash        String
+  must_change_password Boolean             @default(true)
+  updated_at           DateTime            @default(now()) @db.Timestamptz(6)
+  reviewed_documents   CaseDocument[]      @relation("CaseDocumentReviewer")
+  recorded_outcomes    CaseOutcome[]       @relation("CaseOutcomeRecordedBy")
+  cases                PartnerCase[]       @relation("PartnerCaseCaseworker")
+  caseworker_metrics   CaseworkerMetric[]  @relation("CaseworkerMetricCaseworker")
+  communications       Communication[]     @relation("CommunicationSentBy")
+  flags                CaseFlag[]          @relation("CaseFlagFlaggedBy")
+  mothers              Mother[]            @relation("MotherCaseworker")
+  refresh_tokens       OrgRefreshToken[]   @relation("OrgRefreshTokenUser")
+  referrals            Referral[]          @relation("ReferralReferredBy")
+  status_changes       StatusHistory[]     @relation("StatusHistoryChangedBy")
+  organization         Organization        @relation("OrgUserOrganization", fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@index([org_id])
+  @@map("org_users")
+}
+
+model OrgRefreshToken {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token       String   @unique
+  org_user_id String   @db.Uuid
+  revoked     Boolean  @default(false)
+  expires_at  DateTime @db.Timestamptz(6)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  orgUser     OrgUser  @relation("OrgRefreshTokenUser", fields: [org_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([org_user_id])
+  @@map("org_refresh_tokens")
+}
+
+model Mother {
+  id                String           @id @default(uuid()) @db.Uuid
+  user_id           String?          @unique @db.Uuid
+  caseworker_id     String?          @db.Uuid
+  dob               DateTime?        @db.Date
+  phone             String?
+  address           String?
+  enrollment_status EnrollmentStatus @default(pending)
+  created_at        DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime         @default(now()) @db.Timestamptz(6)
+  cases             PartnerCase[]    @relation("PartnerCaseMother")
+  caseworker        OrgUser?         @relation("MotherCaseworker", fields: [caseworker_id], references: [id])
+  user              User?            @relation("MotherUser", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([caseworker_id])
+  @@map("mothers")
+}
+
+model PartnerCase {
+  id                  String          @id @default(uuid()) @db.Uuid
+  mother_id           String          @db.Uuid
+  caseworker_id       String?         @db.Uuid
+  program_id          String
+  application_id      String?         @db.Uuid
+  status              String
+  urgency_level       String?
+  quarter             String?
+  intake_date         DateTime?       @db.Date
+  last_activity       DateTime?       @db.Timestamptz(6)
+  secure_submitted_at DateTime?       @db.Timestamptz(6)
+  created_at          DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime        @updatedAt @db.Timestamptz(6)
+  deadlines           CaseDeadline[]  @relation("CaseDeadlineCase")
+  documents           CaseDocument[]  @relation("CaseDocumentCase")
+  outcomes            CaseOutcome[]   @relation("CaseOutcomeCase")
+  application         Application?    @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  caseworker          OrgUser?        @relation("PartnerCaseCaseworker", fields: [caseworker_id], references: [id])
+  mother              Mother          @relation("PartnerCaseMother", fields: [mother_id], references: [id], onDelete: Cascade)
+  program             BenefitProgram  @relation("PartnerCaseProgram", fields: [program_id], references: [id])
+  communications Communication[] @relation("CommunicationCase")
+  flags          CaseFlag[]      @relation("CaseFlagCase")
+  referrals      Referral[]      @relation("ReferralCase")
+  status_history StatusHistory[] @relation("StatusHistoryCase")
+
+  @@index([mother_id])
+  @@index([caseworker_id])
+  @@index([program_id])
+  @@index([application_id])
+  @@index([secure_submitted_at])
+  @@index([mother_id, program_id, quarter])
+  @@map("cases")
+}
+
+model CaseOutcome {
+  id                 String            @id @default(uuid()) @db.Uuid
+  case_id            String            @db.Uuid
+  result             CaseOutcomeResult
+  denial_reason      String?
+  benefit_amount_usd Decimal?          @db.Decimal(12, 2)
+  first_benefit_date DateTime?         @db.Date
+  decided_at         DateTime?         @db.Timestamptz(6)
+  recorded_by        String?           @db.Uuid
+  notes              String?
+  updated_at         DateTime          @default(now()) @db.Timestamptz(6)
+  case               PartnerCase       @relation("CaseOutcomeCase", fields: [case_id], references: [id], onDelete: Cascade)
+  recorded_by_user   OrgUser?          @relation("CaseOutcomeRecordedBy", fields: [recorded_by], references: [id])
+
+  @@index([case_id])
+  @@index([recorded_by])
+  @@map("case_outcomes")
+}
+
+model CaseworkerMetric {
+  id                   String              @id @default(uuid()) @db.Uuid
+  caseworker_id        String              @db.Uuid
+  org_id               String              @db.Uuid
+  period               String
+  active_case_count    Int                 @default(0)
+  completion_rate      Decimal?            @db.Decimal(5, 2)
+  avg_response_hours   Decimal?            @db.Decimal(8, 2)
+  caseload_utilization Decimal?            @db.Decimal(5, 2)
+  computed_at          DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime            @default(now()) @db.Timestamptz(6)
+  caseworker           OrgUser             @relation("CaseworkerMetricCaseworker", fields: [caseworker_id], references: [id], onDelete: Cascade)
+  @@index([caseworker_id])
+  @@index([org_id])
+  @@map("caseworker_metrics")
+}
+
+model OrgMetricsSnapshot {
+  id                         String              @id @default(uuid()) @db.Uuid
+  org_id                     String              @db.Uuid
+  period                     String
+  mothers_served             Int                 @default(0)
+  benefits_unlocked_usd      Decimal?            @db.Decimal(14, 2)
+  submission_rate            Decimal?            @db.Decimal(5, 2)
+  approval_rate              Decimal?            @db.Decimal(5, 2)
+  renewal_compliance_rate    Decimal?            @db.Decimal(5, 2)
+  avg_intake_to_benefit_days Decimal?            @db.Decimal(8, 2)
+  computed_at                DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime            @default(now()) @db.Timestamptz(6)
+  @@index([org_id])
+  @@map("org_metrics_snapshots")
+}
+
+model CaseDeadline {
+  id            String      @id @default(uuid()) @db.Uuid
+  case_id       String      @db.Uuid
+  type          String
+  due_date      DateTime    @db.Date
+  is_resolved   Boolean     @default(false)
+  alert_sent_at DateTime?   @db.Timestamptz(6)
+  notes         String?
+  updated_at    DateTime    @default(now()) @db.Timestamptz(6)
+  case          PartnerCase @relation("CaseDeadlineCase", fields: [case_id], references: [id], onDelete: Cascade)
+
+  @@index([case_id])
+  @@map("case_deadlines")
+}
+
+model CaseDocument {
+  id            String               @id @default(uuid()) @db.Uuid
+  case_id       String               @db.Uuid
+  doc_type      String
+  file_url      String
+  uploaded_at   DateTime             @default(now()) @db.Timestamptz(6)
+  expiry_date   DateTime?            @db.Date
+  review_status DocumentReviewStatus @default(pending)
+  reviewed_by   String?              @db.Uuid
+  updated_at    DateTime             @default(now()) @db.Timestamptz(6)
+  case          PartnerCase          @relation("CaseDocumentCase", fields: [case_id], references: [id], onDelete: Cascade)
+  reviewer      OrgUser?             @relation("CaseDocumentReviewer", fields: [reviewed_by], references: [id])
+
+  @@index([case_id])
+  @@index([reviewed_by])
+  @@map("case_documents")
+}
+
+model CaseFlag {
+  id              String      @id @default(uuid()) @db.Uuid
+  case_id         String      @db.Uuid
+  flagged_by      String?     @db.Uuid
+  reason          String
+  status          FlagStatus  @default(open)
+  created_at      DateTime    @default(now()) @db.Timestamptz(6)
+  resolved_at     DateTime?   @db.Timestamptz(6)
+  updated_at      DateTime    @default(now()) @db.Timestamptz(6)
+  case            PartnerCase @relation("CaseFlagCase", fields: [case_id], references: [id], onDelete: Cascade)
+  flagged_by_user OrgUser?    @relation("CaseFlagFlaggedBy", fields: [flagged_by], references: [id])
+
+  @@index([case_id])
+  @@index([flagged_by])
+  @@map("flags")
+}
+
+model Communication {
+  id              String                      @id @default(uuid()) @db.Uuid
+  case_id         String                      @db.Uuid
+  sent_by         String?                     @db.Uuid
+  type            String
+  channel         CommunicationChannel
+  message         String
+  sent_at         DateTime?                   @db.Timestamptz(6)
+  responded_at    DateTime?                   @db.Timestamptz(6)
+  delivery_status CommunicationDeliveryStatus @default(pending)
+  updated_at      DateTime                    @default(now()) @db.Timestamptz(6)
+  case            PartnerCase                 @relation("CommunicationCase", fields: [case_id], references: [id], onDelete: Cascade)
+  sent_by_user    OrgUser?                    @relation("CommunicationSentBy", fields: [sent_by], references: [id])
+
+  @@index([case_id])
+  @@index([sent_by])
+  @@map("communications")
+}
+
+model Referral {
+  id               String              @id @default(uuid()) @db.Uuid
+  case_id          String              @db.Uuid
+  from_org_id      String              @db.Uuid
+  to_org_id        String              @db.Uuid
+  referred_by      String?             @db.Uuid
+  status           ReferralStatus      @default(pending)
+  outcome          ReferralOutcome?
+  responded_at     DateTime?           @db.Timestamptz(6)
+  notes            String?
+  created_at       DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime            @default(now()) @db.Timestamptz(6)
+  case             PartnerCase         @relation("ReferralCase", fields: [case_id], references: [id], onDelete: Cascade)
+  referred_by_user OrgUser? @relation("ReferralReferredBy", fields: [referred_by], references: [id])
+
+  @@index([case_id])
+  @@index([from_org_id])
+  @@index([to_org_id])
+  @@index([referred_by])
+  @@map("referrals")
+}
+
+model StatusHistory {
+  id              String      @id @default(uuid()) @db.Uuid
+  case_id         String      @db.Uuid
+  changed_by      String?     @db.Uuid
+  old_status      String?
+  new_status      String
+  changed_at      DateTime    @default(now()) @db.Timestamptz(6)
+  notes           String?
+  updated_at      DateTime    @default(now()) @db.Timestamptz(6)
+  case            PartnerCase @relation("StatusHistoryCase", fields: [case_id], references: [id], onDelete: Cascade)
+  changed_by_user OrgUser?    @relation("StatusHistoryChangedBy", fields: [changed_by], references: [id])
+
+  @@index([case_id])
+  @@index([changed_by])
+  @@map("status_history")
+}
+
+enum OrganizationType {
+  nonprofit_501c3          @map("Non-profit (501c3)")
+  government_agency        @map("Government Agency")
+  cooperative              @map("Cooperative")
+  other                    @map("Other")
+  network_211              @map("211 Network")
+  childcare_provider       @map("Childcare Provider")
+  dv_coalition             @map("DV Coalition")
+  education_nonprofit      @map("Education Nonprofit")
+  emergency_shelter        @map("Emergency Shelter")
+  faith_based              @map("Faith-Based")
+  food_bank                @map("Food Bank")
+  health_clinic            @map("Health Clinic")
+  housing_nonprofit        @map("Housing Nonprofit")
+  immigration_nonprofit    @map("Immigration Nonprofit")
+  legal_aid                @map("Legal Aid")
+  workforce_development    @map("Workforce Development")
+  wraparound_nonprofit     @map("Wraparound Nonprofit")
+}
+
+enum UserRole {
+  user
+  admin
+  counselor
+}
+
+enum OrgUserRole {
+  admin
+  caseworker
+}
+
+enum UserPlan {
+  community
+  partner
+  network
+}
+
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
+  incomplete
+  trialing
+  unpaid
+}
+
+enum PaymentStatus {
+  succeeded
+  failed
+  pending
+}
+
+enum UserStatus {
+  active
+  inactive
+  flagged
+}
+
+enum EligibilityStatus {
+  qualified
+  likely_qualified
+  check_required
+  not_qualified
+}
+
+enum ApplicationStatus {
+  draft
+  submitted
+  under_review
+  action_required
+  approved
+  rejected
+  withdrawn
+  not_started
+}
+
+enum ApplicationPriority {
+  normal
+  high
+  urgent
+}
+
+enum QuarterDueDateSource {
+  GOVT
+  CALCULATED
+}
+
+enum EnrollmentStatus {
+  enrolled
+  pending
+  waitlisted
+  inactive
+}
+
+enum CaseOutcomeResult {
+  approved
+  denied
+}
+
+enum DocumentReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+enum FlagStatus {
+  open
+  resolved
+  dismissed
+}
+
+enum CommunicationChannel {
+  email
+  sms
+  portal
+}
+
+enum CommunicationDeliveryStatus {
+  pending
+  sent
+  delivered
+  failed
+}
+
+enum ReferralStatus {
+  pending
+  accepted
+  declined
+}
+
+enum ReferralOutcome {
+  success
+  fail
+}
